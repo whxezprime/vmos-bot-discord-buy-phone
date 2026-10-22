@@ -1,0 +1,15 @@
+{
+  "name": "vmos-auto-bot",
+  "version": "1.0.0",
+  "description": "Bot tự động đăng ký, lấy OTP, đổi pass và tạo máy ảo VMOS Trial",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "@cemalgnlts/mailjs": "^1.0.4",
+    "axios": "^1.6.8",
+    "crypto-js": "^4.2.0",
+    "playwright": "^1.42.1"
+  }
+}
