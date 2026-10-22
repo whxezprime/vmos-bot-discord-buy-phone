@@ -1,199 +1,135 @@
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { chromium } = require('playwright');
 const Mailjs = require("@cemalgnlts/mailjs");
 const axios = require('axios');
 const CryptoJS = require('crypto-js');
 
-// ================= CẤU HÌNH =================
-const VMOS_REGISTER_URL = 'https://cloud.vmoscloud.com/register'; // Link đăng ký thực tế
-const VMOS_LOGIN_URL = 'https://cloud.vmoscloud.com/login'; 
-const USER_PASSWORD = 'Truong@123456'; // Mật khẩu bạn muốn cài cho user
+// ================= CẤU HÌNH CỦA BẠN =================
+const DISCORD_TOKEN = 'TOKEN_CUA_BAN_VAO_DAY'; 
+const CLIENT_ID = 'CLIENT_ID_CUA_BAN_VAO_DAY';
+const USER_PASSWORD = 'Truong@123456'; // Mật khẩu cho tài khoản VMOS
 const TIME_OUT = 60000; // 60 giây chờ OTP
+// =====================================================
 
-// ================= 1. HÀM LẤY EMAIL VÀ OTP =================
+// ================= CÁC HÀM XỬ LÝ TỰ ĐỘNG =================
 async function createTempEmailAndGetOTP() {
     const mailjs = new Mailjs();
-    console.log("⏳ Đang tạo email tạm thời...");
     const account = await mailjs.createOneAccount();
     const email = account.data.address;
     const pass = account.data.password;
-    console.log(`✅ Đã tạo email: ${email}`);
-
     await mailjs.login(email, pass);
     return { mailjs, email };
 }
 
 async function waitForOTP(mailjs) {
-    console.log("⏳ Đang chờ email chứa mã OTP từ VMOS...");
     const startTime = Date.now();
-    
     while (Date.now() - startTime < TIME_OUT) {
         const messages = await mailjs.getMessages();
         for (const msg of messages) {
-            // Tìm chuỗi 4-6 chữ số trong tiêu đề hoặc nội dung email
             const match = msg.subject.match(/\d{4,6}/) || msg.intro.match(/\d{4,6}/);
-            if (match) {
-                console.log(`✅ Đã tìm thấy OTP: ${match[0]}`);
-                return match[0];
-            }
+            if (match) return match[0];
         }
-        await new Promise(r => setTimeout(r, 3000)); // Chờ 3s kiểm tra lại
+        await new Promise(r => setTimeout(r, 3000));
     }
-    throw new Error("❌ Hết thời gian chờ OTP. Có thể VMOS chặn email tạm thời.");
+    throw new Error("Hết thời gian chờ OTP.");
 }
 
-// ================= 2. HÀM TỰ ĐỘNG ĐĂNG KÝ WEB =================
-async function autoRegisterVMOS(browser, email, otp) {
-    const page = await browser.newPage();
-    console.log("🌐 Đang truy cập trang đăng ký VMOS...");
+async function runAutomation() {
+    const { mailjs, email } = await createTempEmailAndGetOTP();
     
-    // Chặn tải hình ảnh để bot chạy nhanh hơn
+    // Chạy headless: true vì trên host không có giao diện đồ họa (GUI)
+    const browser = await chromium.launch({ 
+        headless: true, 
+        args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'] 
+    });
+    
+    const page = await browser.newPage();
     await page.route('**/*.{png,jpg,jpeg,svg}', route => route.abort());
 
-    await page.goto(VMOS_REGISTER_URL, { waitUntil: 'networkidle' });
-
     try {
-        // CẢNH BÁO: Các selector dưới đây cần được cập nhật bằng F12
-        console.log("📝 Đang điền form đăng ký...");
-        await page.fill('input[type="text"][placeholder*="mail"]', email); 
-        await page.fill('input[type="password"]', USER_PASSWORD); 
+        await page.goto('https://cloud.vmoscloud.com/register', { waitUntil: 'domcontentloaded' });
         
-        // --- XỬ LÝ CAPTCHA TẠI ĐÂY ---
-        // Nếu có Captcha (ví dụ Cloudflare Turnstile hoặc reCAPTCHA):
-        // const captchaToken = await solveCaptchaWith2Captcha(page.url());
-        // await page.evaluate((token) => { document.getElementById('captcha-response').value = token; }, captchaToken);
-        // -----------------------------
-
-        // Click nút Đăng ký
-        await page.click('button[type="submit"]');
-        
-        // Chờ trang chuyển sang form nhập OTP
-        console.log("📨 Đang chờ form nhập OTP...");
-        await page.waitForSelector('input[placeholder*="OTP"], input[placeholder*="mã xác nhận"]', { timeout: 15000 });
-        
-        // Điền OTP
-        await page.fill('input[placeholder*="OTP"], input[placeholder*="mã xác nhận"]', otp);
-        await page.click('button[type="submit"]');
-
-        // Chờ vào Dashboard
-        console.log("⏳ Chờ vào trang quản trị...");
-        await page.waitForURL('**/dashboard**', { timeout: 20000 });
-        console.log("✅ Đăng ký & Đăng nhập thành công!");
-
-        // --- LẤY API KEY ĐỂ TẠO MÁY ---
-        console.log("🔑 Đang lấy API Key...");
-        // Bạn cần F12 xem trang quản lý API của VMOS nằm ở đâu
-        await page.goto('https://cloud.vmoscloud.com/dashboard/api-keys', { waitUntil: 'networkidle' }); 
-        
-        // Giả sử API key hiển thị trên trang (Bạn cần tự F12 để sửa selector)
-        // const accessKey = await page.locator('.access-key-class').innerText();
-        // const secretKey = await page.locator('.secret-key-class').innerText();
-        
-        // Do không rõ giao diện thực tế, mình sẽ trả về key giả định. 
-        // Bạn phải thay bằng logic cào dữ liệu thực tế ở trên.
-        const accessKey = "YOUR_EXTRACTED_ACCESS_KEY"; 
-        const secretKey = "YOUR_EXTRACTED_SECRET_KEY";
-
-        return { accessKey, secretKey };
-    } catch (error) {
-        console.error("❌ Lỗi trong quá trình đăng ký:", error.message);
-        await page.screenshot({ path: 'error_register.png' }); // Chụp ảnh màn hình lúc lỗi để debug
-        throw error;
-    } finally {
-        await page.close();
-    }
-}
-
-// ================= 3. HÀM GỌI API TẠO MÁY ẢO =================
-async function createTrialInstance(accessKey, secretKey) {
-    console.log("🚀 Đang gọi API để mua máy ảo Trial...");
-    const API_HOST = 'https://api.vmoscloud.com';
-    const path = '/vcpcloud/api/padApi/create_instance';
-    const body = JSON.stringify({ image: 'android-12', count: 1 });
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-
-    // Tạo chữ ký (Cần check lại tài liệu VMOS xem dùng HMAC-SHA256 hay SHA256)
-    const signString = secretKey + timestamp + path + body;
-    const sign = CryptoJS.HmacSHA256(signString, secretKey).toString(CryptoJS.enc.Hex);
-
-    try {
-        const response = await axios.post(`${API_HOST}${path}`, body, {
-            headers: {
-                'X-Access-Key': accessKey,
-                'X-Timestamp': timestamp,
-                'X-Sign': sign,
-                'Content-Type': 'application/json'
-            }
-        });
-        console.log('✅ Tạo máy ảo thành công:', response.data);
-        return response.data; 
-    } catch (error) {
-        console.error('❌ Lỗi tạo máy ảo:', error.response?.data || error.message);
-        return null;
-    }
-}
-
-// ================= 4. LUỒNG CHẠY CHÍNH =================
-(async () => {
-    let browser;
-    try {
-        console.log("=== BẮT ĐẦU QUY TRÌNH TẠO ACC GAME TREO ===");
-        
-        // Bước 1: Lấy Email
-        const { mailjs, email } = await createTempEmailAndGetOTP();
-
-        // Bước 2: Mở trình duyệt
-        browser = await chromium.launch({ 
-            headless: false, // Để false để bạn xem bot thao tác, khi chạy thật thì đổi thành true
-            args: ['--disable-blink-features=AutomationControlled'] // Tránh bị phát hiện là bot
-        });
-
-        // Bước 3: Đăng ký tài khoản & Lấy OTP
-        // (Hàm này sẽ đứng chờ cho đến khi có OTP trong mail)
-        const otpPromise = waitForOTP(mailjs);
-        
-        // Vì bước đăng ký cần OTP, nên ta phải chờ form web hiện ra trước, 
-        // nhưng Playwright chạy bất đồng bộ. Ta sẽ cho chạy song song.
-        // Tuy nhiên, cách an toàn nhất là:
-        // 1. Điền email -> 2. Bấm Đăng ký -> 3. Đợi OTP -> 4. Điền OTP
-        
-        const page = await browser.newPage();
-        await page.goto(VMOS_REGISTER_URL, { waitUntil: 'domcontentloaded' });
-        
-        // Điền email và pass
+        // --- BẠN CẦN F12 TRANG WEB ĐỂ CẬP NHẬT LẠI CÁC SELECTOR NÀY ---
         await page.fill('input[placeholder*="mail"]', email);
         await page.fill('input[type="password"]', USER_PASSWORD);
-        await page.click('button[type="submit"]'); // Bấm đăng ký
+        await page.click('button[type="submit"]');
 
-        // Chờ lấy OTP từ mail
-        const otp = await otpPromise;
+        const otp = await waitForOTP(mailjs);
 
-        // Điền OTP
         await page.waitForSelector('input[placeholder*="OTP"]', { timeout: 20000 });
         await page.fill('input[placeholder*="OTP"]', otp);
         await page.click('button[type="submit"]');
 
-        // Chờ vào Dashboard
         await page.waitForURL('**/dashboard**', { timeout: 20000 });
-        console.log("✅ Đăng ký thành công!");
-
-        // (Tại đây, nếu muốn đổi mật khẩu thành mật khẩu user yêu cầu, bạn dùng page.goto('.../profile') và thao tác)
-
-        // Bước 4: Lấy API Key
-        // ... (Phần cào API Key như đã nói ở trên)
+        
+        // TODO: Lấy API Key thực tế tại đây nếu cần tạo máy ảo
         const accessKey = "KEY_CUA_BAN"; 
         const secretKey = "SECRET_CUA_BAN";
 
-        // Bước 5: Tạo máy ảo
-        if (accessKey !== "KEY_CUA_BAN") {
-            await createTrialInstance(accessKey, secretKey);
-            console.log(`🎉 HOÀN TẤT! Tài khoản: ${email} | Pass: ${USER_PASSWORD}`);
-        } else {
-            console.log(`⚠️ Đã tạo xong acc: ${email} | Pass: ${USER_PASSWORD}. Nhưng chưa lấy được API Key để tạo máy.`);
-        }
-
-    } catch (error) {
-        console.error("❌ Lỗi luồng chính:", error);
+        return { email, accessKey, secretKey };
     } finally {
-        if (browser) await browser.close();
+        await browser.close();
     }
-})();
+}
+
+// ================= CẤU HÌNH DISCORD BOT =================
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+const commands = [
+    new SlashCommandBuilder()
+        .setName('taoacc')
+        .setDescription('Tự động tạo tài khoản VMOS Trial và máy ảo')
+].map(command => command.toJSON());
+
+client.once('ready', async () => {
+    console.log(`🤖 Bot đã online: ${client.user.tag}`);
+    const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log('✅ Đã đăng ký lệnh Slash thành công!');
+    } catch (error) {
+        console.error(error);
+    }
+});
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'taoacc') {
+        await interaction.deferReply(); 
+
+        const embed = new EmbedBuilder()
+            .setTitle('⏳ Đang xử lý...')
+            .setDescription('Bot đang tạo email, đăng ký tài khoản và chờ OTP. Vui lòng đợi (1-2 phút)...')
+            .setColor(0xFFFF00);
+
+        await interaction.editReply({ embeds: [embed] });
+
+        try {
+            const result = await runAutomation();
+            
+            const successEmbed = new EmbedBuilder()
+                .setTitle('✅ TẠO TÀI KHOẢN THÀNH CÔNG')
+                .setColor(0x00FF00)
+                .addFields(
+                    { name: '📧 Email', value: `\`${result.email}\``, inline: true },
+                    { name: '🔑 Mật khẩu', value: `\`${USER_PASSWORD}\``, inline: true },
+                    { name: '📱 Trạng thái', value: 'Đã tạo máy ảo Trial (Nếu có API Key)', inline: false }
+                )
+                .setTimestamp();
+
+            await interaction.editReply({ embeds: [successEmbed] });
+        } catch (error) {
+            console.error(error);
+            const errorEmbed = new EmbedBuilder()
+                .setTitle('❌ CÓ LỖI XẢY RA')
+                .setDescription(`\`\`\`${error.message}\`\`\``)
+                .setColor(0xFF0000);
+            
+            await interaction.editReply({ embeds: [errorEmbed] });
+        }
+    }
+});
+
+// Đăng nhập bot
+client.login(DISCORD_TOKEN);
