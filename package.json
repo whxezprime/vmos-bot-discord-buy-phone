@@ -1,7 +1,7 @@
 {
-  "name": "vmos-auto-bot",
+  "name": "vmos-discord-bot",
   "version": "1.0.0",
-  "description": "Bot tự động đăng ký, lấy OTP, đổi pass và tạo máy ảo VMOS Trial",
+  "description": "Bot Discord tự động tạo VMOS trial",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
@@ -10,6 +10,7 @@
     "@cemalgnlts/mailjs": "^1.0.4",
     "axios": "^1.6.8",
     "crypto-js": "^4.2.0",
+    "discord.js": "^14.14.1",
     "playwright": "^1.42.1"
   }
 }
